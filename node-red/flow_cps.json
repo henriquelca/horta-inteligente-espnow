@@ -1,0 +1,497 @@
+[
+  {
+    "id": "cps_tab_flow",
+    "type": "tab",
+    "label": "CPS - Rede ESP-NOW (equipeX)",
+    "disabled": false,
+    "info": ""
+  },
+  {
+    "id": "cps_broker",
+    "type": "mqtt-broker",
+    "name": "Broker broker.hivemq.com",
+    "broker": "broker.hivemq.com",
+    "port": "1883",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "cps_ui_tab",
+    "type": "ui_tab",
+    "name": "CPS equipeX",
+    "icon": "dashboard",
+    "order": 1,
+    "disabled": false,
+    "hidden": false
+  },
+  {
+    "id": "cps_g_status",
+    "type": "ui_group",
+    "name": "Gateway",
+    "tab": "cps_ui_tab",
+    "order": 1,
+    "disp": true,
+    "width": "6",
+    "collapse": false,
+    "className": ""
+  },
+  {
+    "id": "cps_g_sens",
+    "type": "ui_group",
+    "name": "Sensores em tempo real",
+    "tab": "cps_ui_tab",
+    "order": 2,
+    "disp": true,
+    "width": "18",
+    "collapse": false,
+    "className": ""
+  },
+  {
+    "id": "cps_g_graf",
+    "type": "ui_group",
+    "name": "Histórico",
+    "tab": "cps_ui_tab",
+    "order": 3,
+    "disp": true,
+    "width": "12",
+    "collapse": false,
+    "className": ""
+  },
+  {
+    "id": "cps_in_sens",
+    "type": "mqtt in",
+    "z": "cps_tab_flow",
+    "name": "Sensores",
+    "topic": "cps/equipeX/sensor/+",
+    "qos": "0",
+    "datatype": "utf8",
+    "broker": "cps_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 110,
+    "y": 100,
+    "wires": [
+      [
+        "cps_json"
+      ]
+    ]
+  },
+  {
+    "id": "cps_json",
+    "type": "json",
+    "z": "cps_tab_flow",
+    "name": "JSON -> objeto",
+    "property": "payload",
+    "action": "obj",
+    "pretty": false,
+    "x": 290,
+    "y": 100,
+    "wires": [
+      [
+        "cps_fn_ts"
+      ]
+    ]
+  },
+  {
+    "id": "cps_fn_ts",
+    "type": "function",
+    "z": "cps_tab_flow",
+    "name": "Carimbo de tempo (servidor)",
+    "func": "// Associa o horário de RECEPÇÃO (relógio do servidor Node-RED) a cada mensagem\nconst p = msg.payload;\nif (typeof p !== 'object' || p === null || p.id === undefined) {\n    node.warn('Mensagem sem id ignorada: ' + JSON.stringify(p));\n    return null;\n}\nconst agora = new Date();\np.ts_ms = agora.getTime();\np.ts = agora.toISOString();\np.hora = agora.toLocaleTimeString('pt-BR');\nmsg.sensor = String(p.id);\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 500,
+    "y": 100,
+    "wires": [
+      [
+        "cps_fn_v1",
+        "cps_fn_v2",
+        "cps_fn_csv",
+        "cps_fn_tab",
+        "cps_debug"
+      ]
+    ]
+  },
+  {
+    "id": "cps_fn_v1",
+    "type": "function",
+    "z": "cps_tab_flow",
+    "name": "v1 por sensor",
+    "func": "// Uma série por sensor no gráfico (msg.topic = id do sensor)\nconst v = msg.payload.v1;\nif (typeof v !== 'number') return null;\nreturn { topic: msg.sensor, payload: v };",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 720,
+    "y": 60,
+    "wires": [
+      [
+        "cps_chart_v1"
+      ]
+    ]
+  },
+  {
+    "id": "cps_fn_v2",
+    "type": "function",
+    "z": "cps_tab_flow",
+    "name": "v2 por sensor",
+    "func": "// Uma série por sensor no gráfico (msg.topic = id do sensor)\nconst v = msg.payload.v2;\nif (typeof v !== 'number') return null;\nreturn { topic: msg.sensor, payload: v };",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 720,
+    "y": 120,
+    "wires": [
+      [
+        "cps_chart_v2"
+      ]
+    ]
+  },
+  {
+    "id": "cps_chart_v1",
+    "type": "ui_chart",
+    "z": "cps_tab_flow",
+    "name": "Gráfico v1",
+    "group": "cps_g_graf",
+    "order": 1,
+    "width": "12",
+    "height": "6",
+    "label": "Temperatura (°C) — v1",
+    "chartType": "line",
+    "legend": "true",
+    "xformat": "HH:mm:ss",
+    "interpolate": "linear",
+    "nodata": "Sem dados ainda",
+    "dot": false,
+    "ymin": "",
+    "ymax": "",
+    "removeOlder": "1",
+    "removeOlderPoints": "2000",
+    "removeOlderUnit": "3600",
+    "cutout": 0,
+    "useOneColor": false,
+    "useUTC": false,
+    "colors": [
+      "#1f77b4",
+      "#d62728",
+      "#2ca02c",
+      "#ff7f0e",
+      "#9467bd",
+      "#8c564b",
+      "#e377c2",
+      "#7f7f7f",
+      "#17becf"
+    ],
+    "outputs": 1,
+    "useDifferentColor": false,
+    "className": "",
+    "x": 900,
+    "y": 60,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "cps_chart_v2",
+    "type": "ui_chart",
+    "z": "cps_tab_flow",
+    "name": "Gráfico v2",
+    "group": "cps_g_graf",
+    "order": 2,
+    "width": "12",
+    "height": "6",
+    "label": "Umidade (%) — v2",
+    "chartType": "line",
+    "legend": "true",
+    "xformat": "HH:mm:ss",
+    "interpolate": "linear",
+    "nodata": "Sem dados ainda",
+    "dot": false,
+    "ymin": "",
+    "ymax": "",
+    "removeOlder": "1",
+    "removeOlderPoints": "2000",
+    "removeOlderUnit": "3600",
+    "cutout": 0,
+    "useOneColor": false,
+    "useUTC": false,
+    "colors": [
+      "#1f77b4",
+      "#d62728",
+      "#2ca02c",
+      "#ff7f0e",
+      "#9467bd",
+      "#8c564b",
+      "#e377c2",
+      "#7f7f7f",
+      "#17becf"
+    ],
+    "outputs": 1,
+    "useDifferentColor": false,
+    "className": "",
+    "x": 900,
+    "y": 120,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "cps_fn_csv",
+    "type": "function",
+    "z": "cps_tab_flow",
+    "name": "Linha CSV",
+    "func": "// Uma linha CSV por mensagem; o arquivo fica na pasta do usuário\nconst casa = env.get('HOME') || env.get('USERPROFILE') || '.';\nconst arquivo = casa + '/cps_log_equipeX.csv';\nconst p = msg.payload;\nconst campo = v => (v === undefined || v === null) ? '' : String(v);\nconst linhas = [];\nif (!context.get('cabecalho')) {   // escreve o cabeçalho a cada (re)deploy\n    context.set('cabecalho', true);\n    linhas.push({ filename: arquivo, payload: 'ts_iso,ts_ms,id,cont,v1,v2,hop,rep,rssi' });\n}\nlinhas.push({ filename: arquivo, payload: [p.ts, p.ts_ms, p.id, p.cont, p.v1, p.v2, p.hop, p.rep, p.rssi].map(campo).join(',') });\nreturn [linhas];",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 720,
+    "y": 180,
+    "wires": [
+      [
+        "cps_file"
+      ]
+    ]
+  },
+  {
+    "id": "cps_file",
+    "type": "file",
+    "z": "cps_tab_flow",
+    "name": "Log em arquivo (~/cps_log_*.csv)",
+    "filename": "",
+    "appendNewline": true,
+    "createDir": true,
+    "overwriteFile": "false",
+    "encoding": "utf8",
+    "x": 960,
+    "y": 180,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "cps_fn_tab",
+    "type": "function",
+    "z": "cps_tab_flow",
+    "name": "Tabela + PDR por sensor",
+    "func": "// Estado por sensor: últimos valores + estatística de entrega (PDR) ao vivo\nlet s = flow.get('sensores') || {};\nif (msg.reset) { s = {}; flow.set('sensores', s); }\nelse if (!msg.tick) {\n    const p = msg.payload, id = msg.sensor;\n    let e = s[id];\n    // sensor novo ou contador reiniciado (reset do nó / nova rodada de teste)\n    if (!e || p.cont < e.ultimoCont) e = { id: id, primeiroCont: p.cont, recebidas: 0, ultimoCont: p.cont - 1 };\n    if (p.cont !== e.ultimoCont) e.recebidas++;           // ignora duplicatas\n    Object.assign(e, { ultimoCont: p.cont, v1: p.v1, v2: p.v2, hop: p.hop,\n                       rep: p.rep, rssi: p.rssi, hora: p.hora, ts_ms: p.ts_ms });\n    e.esperadas = e.ultimoCont - e.primeiroCont + 1;\n    e.perdidas = e.esperadas - e.recebidas;\n    e.pdr = e.esperadas > 0 ? 100 * e.recebidas / e.esperadas : 100;\n    s[id] = e;\n    flow.set('sensores', s);\n}\nconst agora = Date.now();\nmsg.payload = Object.values(s)\n    .map(e => Object.assign({}, e, { idade: Math.round((agora - e.ts_ms) / 1000) }))\n    .sort((a, b) => a.id.localeCompare(b.id));\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 740,
+    "y": 240,
+    "wires": [
+      [
+        "cps_tpl_tab"
+      ]
+    ]
+  },
+  {
+    "id": "cps_tpl_tab",
+    "type": "ui_template",
+    "z": "cps_tab_flow",
+    "group": "cps_g_sens",
+    "name": "Tabela sensores",
+    "order": 1,
+    "width": "18",
+    "height": "5",
+    "format": "<div class=\"cps-wrap\">\n<table class=\"cps\">\n  <tr><th>Sensor (MAC)</th><th>Temperatura (°C)<br><small>v1</small></th><th>Umidade (%)<br><small>v2</small></th>\n      <th>Contador</th><th>Hop</th><th>RSSI</th><th>Recebidas / Esperadas</th><th>PDR</th><th>Última msg</th></tr>\n  <tr ng-repeat=\"s in msg.payload\" ng-class=\"{'cps-velho': s.idade > 10}\">\n    <td><b>{{s.id}}</b><br><small>via {{s.rep}}</small></td>\n    <td class=\"cps-num\">{{s.v1 === null ? '—' : (s.v1 | number:1)}}</td>\n    <td class=\"cps-num\">{{s.v2 === null ? '—' : (s.v2 | number:1)}}</td>\n    <td class=\"cps-num\">{{s.ultimoCont}}</td>\n    <td class=\"cps-num\">{{s.hop}}</td>\n    <td class=\"cps-num\">{{s.rssi}} dBm</td>\n    <td class=\"cps-num\">{{s.recebidas}} / {{s.esperadas}}</td>\n    <td class=\"cps-num\"><b>{{s.pdr | number:1}}%</b></td>\n    <td>{{s.hora}}<br><small>há {{s.idade}} s</small></td>\n  </tr>\n</table>\n<p ng-if=\"!msg.payload || !msg.payload.length\">Aguardando mensagens dos sensores...</p>\n</div>\n<style>\n.cps-wrap { overflow-x: auto; }\n.cps { width: 100%; border-collapse: collapse; font-size: 14px; }\n.cps th, .cps td { padding: 6px 8px; border-bottom: 1px solid rgba(128,128,128,.35); text-align: left; }\n.cps th { font-weight: 600; }\n.cps-num { text-align: right !important; font-variant-numeric: tabular-nums; }\n.cps-velho td { opacity: .45; }\n</style>",
+    "storeOutMessages": true,
+    "fwdInMessages": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 980,
+    "y": 240,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "cps_tick",
+    "type": "inject",
+    "z": "cps_tab_flow",
+    "name": "a cada 2 s",
+    "props": [
+      {
+        "p": "tick",
+        "v": "true",
+        "vt": "bool"
+      }
+    ],
+    "repeat": "2",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "1",
+    "topic": "",
+    "x": 500,
+    "y": 280,
+    "wires": [
+      [
+        "cps_fn_tab"
+      ]
+    ]
+  },
+  {
+    "id": "cps_btn_reset",
+    "type": "ui_button",
+    "z": "cps_tab_flow",
+    "name": "Zerar PDR",
+    "group": "cps_g_sens",
+    "order": 2,
+    "width": "4",
+    "height": "1",
+    "passthru": false,
+    "label": "Zerar estatísticas",
+    "tooltip": "Zera contagem de recebidas/PDR (o arquivo de log não é apagado)",
+    "color": "",
+    "bgcolor": "",
+    "className": "",
+    "icon": "refresh",
+    "payload": "",
+    "payloadType": "str",
+    "topic": "reset",
+    "topicType": "str",
+    "x": 490,
+    "y": 320,
+    "wires": [
+      [
+        "cps_fn_reset"
+      ]
+    ]
+  },
+  {
+    "id": "cps_fn_reset",
+    "type": "function",
+    "z": "cps_tab_flow",
+    "name": "marca reset",
+    "func": "msg.reset = true;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 660,
+    "y": 320,
+    "wires": [
+      [
+        "cps_fn_tab"
+      ]
+    ]
+  },
+  {
+    "id": "cps_debug",
+    "type": "debug",
+    "z": "cps_tab_flow",
+    "name": "debug",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 710,
+    "y": 20,
+    "wires": []
+  },
+  {
+    "id": "cps_in_status",
+    "type": "mqtt in",
+    "z": "cps_tab_flow",
+    "name": "Status do gateway (LWT)",
+    "topic": "cps/equipeX/gateway/status",
+    "qos": "1",
+    "datatype": "utf8",
+    "broker": "cps_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 150,
+    "y": 400,
+    "wires": [
+      [
+        "cps_fn_status"
+      ]
+    ]
+  },
+  {
+    "id": "cps_fn_status",
+    "type": "function",
+    "z": "cps_tab_flow",
+    "name": "online/offline",
+    "func": "// LWT do gateway: \"online\" ao conectar, \"offline\" publicado pelo broker se ele cair\nconst txt = String(msg.payload).trim().toLowerCase();\nmsg.payload = { online: txt === 'online', texto: txt, hora: new Date().toLocaleString('pt-BR') };\nflow.set('gateway_online', msg.payload.online);\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 400,
+    "wires": [
+      [
+        "cps_tpl_status"
+      ]
+    ]
+  },
+  {
+    "id": "cps_tpl_status",
+    "type": "ui_template",
+    "z": "cps_tab_flow",
+    "group": "cps_g_status",
+    "name": "Indicador gateway",
+    "order": 1,
+    "width": "6",
+    "height": "2",
+    "format": "<div class=\"gw\">\n  <span class=\"gw-led\" ng-class=\"{'on': msg.payload.online, 'off': msg.payload && !msg.payload.online}\"></span>\n  <span class=\"gw-txt\">{{ !msg.payload ? 'Aguardando...' : (msg.payload.online ? 'ONLINE' : 'OFFLINE') }}</span>\n  <div class=\"gw-hora\" ng-if=\"msg.payload\">desde {{msg.payload.hora}}</div>\n</div>\n<style>\n.gw { display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size: 22px; font-weight: 700; }\n.gw-led { width: 26px; height: 26px; border-radius: 50%; background: #888; }\n.gw-led.on  { background: #2ecc40; box-shadow: 0 0 12px #2ecc40; }\n.gw-led.off { background: #ff4136; box-shadow: 0 0 12px #ff4136; }\n.gw-hora { width:100%; font-size: 13px; font-weight: 400; opacity: .7; }\n</style>",
+    "storeOutMessages": true,
+    "fwdInMessages": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 600,
+    "y": 400,
+    "wires": [
+      []
+    ]
+  }
+]
