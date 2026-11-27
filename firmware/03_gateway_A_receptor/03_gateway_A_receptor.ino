@@ -1,13 +1,18 @@
 /*
  * 03 - GATEWAY, ESP32 "A" (Receptor Local)
  * -----------------------------------------
- * Ponto de terminação da rede ESP-NOW: recebe as mensagens de TODOS os
- * Repetidores e as repassa, uma por linha, ao ESP32 "B" pela UART2
+ * Ponto de terminação da rede ESP-NOW (mesh por inundação em broadcast):
+ * ouve tudo no canal, DESCARTA as cópias repetidas (a mesma mensagem pode
+ * chegar direto do sensor e de novo por um ou mais repetidores) e repassa
+ * cada mensagem UMA vez, uma por linha, ao ESP32 "B" pela UART2
  * (GPIO 16 = RX, GPIO 17 = TX, 115200 baud) com Serial2.println().
+ * Não precisa saber o MAC de nenhuma placa.
  *
  * Cada mensagem vira uma linha JSON terminada em '\n':
  *   {"id":"24:0A:C4:00:01:10","cont":144,"v1":32.40,"v2":55.50,"hop":1,"rep":"..","rssi":-61}
- * "rep" = MAC do repetidor que entregou; "rssi" = sinal do último salto (dBm).
+ * "id"  = MAC do sensor que criou a mensagem (origem);
+ * "rep" = MAC de quem entregou a cópia que chegou primeiro (o próprio sensor se hop=0);
+ * "rssi" = sinal desse último salto (dBm).
  *
  * Por que dois ESP32? O "A" fica só no ESP-NOW (canal fixo) e o "B" fica só no
  * Wi-Fi. Assim o canal do roteador não interfere na rede ESP-NOW.
@@ -27,6 +32,12 @@
 #define TX2           17
 #define BAUD_UART     115200
 
+// 1 = aceita mensagem que veio direto do sensor (hop 0).
+// 0 = só aceita o que passou por pelo menos 1 repetidor. Use 0 no TESTE DE
+//     ALCANCE do repetidor, para o gateway não "furar" o caminho ouvindo o
+//     sensor diretamente quando ele estiver perto.
+#define ACEITAR_DIRETO  1
+
 typedef struct __attribute__((packed)) {
   uint8_t  id[6];
   uint32_t cont;
@@ -41,8 +52,31 @@ typedef struct {
   int      rssi;
 } Recebida;
 
+// ---------- memória de mensagens já vistas (remove duplicadas) ----------
+#define CACHE_N            64
+#define CACHE_VALIDADE_MS  5000
+struct Visto { uint8_t id[6]; uint32_t cont; uint32_t ms; bool usado; };
+Visto cache[CACHE_N];
+int cacheProx = 0;
+
+bool jaVisto(const Mensagem &m) {
+  uint32_t agora = millis();
+  for (int i = 0; i < CACHE_N; i++) {
+    if (cache[i].usado && agora - cache[i].ms < CACHE_VALIDADE_MS &&
+        cache[i].cont == m.cont && memcmp(cache[i].id, m.id, 6) == 0) return true;
+  }
+  memcpy(cache[cacheProx].id, m.id, 6);
+  cache[cacheProx].cont = m.cont;
+  cache[cacheProx].ms = agora;
+  cache[cacheProx].usado = true;
+  cacheProx = (cacheProx + 1) % CACHE_N;
+  return false;
+}
+// -------------------------------------------------------------------------
+
 QueueHandle_t fila;
 volatile uint32_t total = 0, descartadas = 0;
+uint32_t duplicadas = 0, diretasIgnoradas = 0;
 uint32_t ledApagarEm = 0;
 
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -89,12 +123,15 @@ void setup() {
   esp_read_mac(meu, ESP_MAC_WIFI_STA);
   Serial.printf("\nGATEWAY A pronto. Meu MAC: %02X:%02X:%02X:%02X:%02X:%02X (canal %d)\n",
                 meu[0], meu[1], meu[2], meu[3], meu[4], meu[5], CANAL_ESPNOW);
-  Serial.println("Este MAC vai em MAC_GATEWAY no sketch do repetidor.");
+  Serial.printf("Mesh por broadcast: aceita direto do sensor = %s\n", ACEITAR_DIRETO ? "sim" : "nao");
 }
 
 void loop() {
   Recebida r;
   while (xQueueReceive(fila, &r, 0) == pdTRUE) {
+    if (!ACEITAR_DIRETO && r.m.hop == 0) { diretasIgnoradas++; continue; }
+    if (jaVisto(r.m)) { duplicadas++; continue; }   // cópia de algo já repassado ao B
+
     char v1[16], v2[16], linha[200];
     numJson(v1, sizeof(v1), r.m.v1);
     numJson(v2, sizeof(v2), r.m.v2);

@@ -45,7 +45,7 @@ return [linhas];""" % EQUIPE
 
 FN_TABELA = r"""// Estado por sensor: últimos valores + estatística de entrega (PDR) ao vivo
 let s = flow.get('sensores') || {};
-if (msg.reset) { s = {}; flow.set('sensores', s); }
+if (msg.reset) { s = {}; flow.set('sensores', s); flow.set('alturaInicial', {}); }
 else if (!msg.tick) {
     const p = msg.payload, id = msg.sensor;
     let e = s[id];
@@ -57,6 +57,10 @@ else if (!msg.tick) {
     e.esperadas = e.ultimoCont - e.primeiroCont + 1;
     e.perdidas = e.esperadas - e.recebidas;
     e.pdr = e.esperadas > 0 ? 100 * e.recebidas / e.esperadas : 100;
+    // crescimento = altura atual - primeira altura recebida (sobrevive a resets do contador)
+    const ini = flow.get('alturaInicial') || {};
+    if (ini[id] === undefined && typeof p.v2 === 'number') { ini[id] = p.v2; flow.set('alturaInicial', ini); }
+    e.crescimento = (typeof p.v2 === 'number' && ini[id] !== undefined) ? p.v2 - ini[id] : null;
     s[id] = e;
     flow.set('sensores', s);
 }
@@ -74,12 +78,13 @@ return msg;"""
 
 TPL_TABELA = r"""<div class="cps-wrap">
 <table class="cps">
-  <tr><th>Sensor (MAC)</th><th>Temperatura (°C)<br><small>v1</small></th><th>Umidade (%)<br><small>v2</small></th>
+  <tr><th>Sensor (MAC)</th><th>Luz (%)<br><small>v1</small></th><th>Altura (cm)<br><small>v2</small></th><th>Cresceu (cm)</th>
       <th>Contador</th><th>Hop</th><th>RSSI</th><th>Recebidas / Esperadas</th><th>PDR</th><th>Última msg</th></tr>
   <tr ng-repeat="s in msg.payload" ng-class="{'cps-velho': s.idade > 10}">
     <td><b>{{s.id}}</b><br><small>via {{s.rep}}</small></td>
     <td class="cps-num">{{s.v1 === null ? '—' : (s.v1 | number:1)}}</td>
     <td class="cps-num">{{s.v2 === null ? '—' : (s.v2 | number:1)}}</td>
+    <td class="cps-num">{{s.crescimento === null ? '—' : ((s.crescimento >= 0 ? '+' : '') + (s.crescimento | number:1))}}</td>
     <td class="cps-num">{{s.ultimoCont}}</td>
     <td class="cps-num">{{s.hop}}</td>
     <td class="cps-num">{{s.rssi}} dBm</td>
@@ -88,7 +93,7 @@ TPL_TABELA = r"""<div class="cps-wrap">
     <td>{{s.hora}}<br><small>há {{s.idade}} s</small></td>
   </tr>
 </table>
-<p ng-if="!msg.payload || !msg.payload.length">Aguardando mensagens dos sensores...</p>
+<p ng-if="!msg.payload || !msg.payload.length">Aguardando mensagens das plantas...</p>
 </div>
 <style>
 .cps-wrap { overflow-x: auto; }
@@ -113,11 +118,11 @@ TPL_STATUS = r"""<div class="gw">
 </style>"""
 
 
-def chart(nid, nome, label, grupo, ordem):
+def chart(nid, nome, label, grupo, ordem, ymin="", ymax=""):
     return {"id": nid, "type": "ui_chart", "z": TAB, "name": nome, "group": grupo, "order": ordem,
             "width": "12", "height": "6", "label": label, "chartType": "line", "legend": "true",
             "xformat": "HH:mm:ss", "interpolate": "linear", "nodata": "Sem dados ainda", "dot": False,
-            "ymin": "", "ymax": "", "removeOlder": "1", "removeOlderPoints": "2000",
+            "ymin": ymin, "ymax": ymax, "removeOlder": "1", "removeOlderPoints": "2000",
             "removeOlderUnit": "3600", "cutout": 0, "useOneColor": False, "useUTC": False,
             "colors": CORES, "outputs": 1, "useDifferentColor": False, "className": "",
             "x": 900, "y": 60 if nid.endswith("v1") else 120, "wires": [[]]}
@@ -130,20 +135,20 @@ def fn(nid, nome, codigo, x, y, wires, outputs=1):
 
 
 nodes = [
-    {"id": TAB, "type": "tab", "label": f"CPS - Rede ESP-NOW ({EQUIPE})", "disabled": False, "info": ""},
+    {"id": TAB, "type": "tab", "label": f"Horta Inteligente - ESP-NOW ({EQUIPE})", "disabled": False, "info": ""},
     {"id": "cps_broker", "type": "mqtt-broker", "name": f"Broker {BROKER}", "broker": BROKER,
      "port": str(PORTA), "clientid": "", "autoConnect": True, "usetls": False, "protocolVersion": "4",
      "keepalive": "60", "cleansession": True, "autoUnsubscribe": True,
      "birthTopic": "", "birthQos": "0", "birthPayload": "", "birthMsg": {},
      "closeTopic": "", "closeQos": "0", "closePayload": "", "closeMsg": {},
      "willTopic": "", "willQos": "0", "willPayload": "", "willMsg": {}, "userProps": "", "sessionExpiry": ""},
-    {"id": "cps_ui_tab", "type": "ui_tab", "name": f"CPS {EQUIPE}", "icon": "dashboard", "order": 1,
+    {"id": "cps_ui_tab", "type": "ui_tab", "name": f"Horta Inteligente ({EQUIPE})", "icon": "dashboard", "order": 1,
      "disabled": False, "hidden": False},
     {"id": "cps_g_status", "type": "ui_group", "name": "Gateway", "tab": "cps_ui_tab", "order": 1,
      "disp": True, "width": "6", "collapse": False, "className": ""},
-    {"id": "cps_g_sens", "type": "ui_group", "name": "Sensores em tempo real", "tab": "cps_ui_tab",
+    {"id": "cps_g_sens", "type": "ui_group", "name": "Plantas em tempo real", "tab": "cps_ui_tab",
      "order": 2, "disp": True, "width": "18", "collapse": False, "className": ""},
-    {"id": "cps_g_graf", "type": "ui_group", "name": "Histórico", "tab": "cps_ui_tab", "order": 3,
+    {"id": "cps_g_graf", "type": "ui_group", "name": "Gráficos da horta", "tab": "cps_ui_tab", "order": 3,
      "disp": True, "width": "12", "collapse": False, "className": ""},
 
     # ---------- telemetria ----------
@@ -154,10 +159,10 @@ nodes = [
      "action": "obj", "pretty": False, "x": 290, "y": 100, "wires": [["cps_fn_ts"]]},
     fn("cps_fn_ts", "Carimbo de tempo (servidor)", FN_CARIMBO, 500, 100,
        [["cps_fn_v1", "cps_fn_v2", "cps_fn_csv", "cps_fn_tab", "cps_debug"]]),
-    fn("cps_fn_v1", "v1 por sensor", FN_V % "v1", 720, 60, [["cps_chart_v1"]]),
-    fn("cps_fn_v2", "v2 por sensor", FN_V % "v2", 720, 120, [["cps_chart_v2"]]),
-    chart("cps_chart_v1", "Gráfico v1", "Temperatura (°C) — v1", "cps_g_graf", 1),
-    chart("cps_chart_v2", "Gráfico v2", "Umidade (%) — v2", "cps_g_graf", 2),
+    fn("cps_fn_v1", "luz (v1) por sensor", FN_V % "v1", 720, 60, [["cps_chart_v1"]]),
+    fn("cps_fn_v2", "altura (v2) por sensor", FN_V % "v2", 720, 120, [["cps_chart_v2"]]),
+    chart("cps_chart_v1", "Gráfico luz", "Luminosidade recebida pela planta (%)", "cps_g_graf", 1, "0", "100"),
+    chart("cps_chart_v2", "Gráfico altura", "Altura da planta (cm) — crescimento", "cps_g_graf", 2),
     fn("cps_fn_csv", "Linha CSV", FN_CSV, 720, 180, [["cps_file"]]),
     {"id": "cps_file", "type": "file", "z": TAB, "name": "Log em arquivo (~/cps_log_*.csv)",
      "filename": "", "appendNewline": True, "createDir": True, "overwriteFile": "false",

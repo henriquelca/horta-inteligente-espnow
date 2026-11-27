@@ -1,8 +1,10 @@
 /*
  * 01 - NÓ SENSOR INTELIGENTE  (ESP32 DOIT Devkit V1)
  * ---------------------------------------------------
- * HORTA INTELIGENTE: lê luminosidade (v1, %) e altura da planta (v2, cm) e envia via ESP-NOW para o seu
- * Repetidor par. LED local indica o status de cada envio.
+ * HORTA INTELIGENTE: lê luminosidade (v1, %) e altura da planta (v2, cm) e envia via ESP-NOW
+ * em BROADCAST (FF:FF:FF:FF:FF:FF). Não precisa saber o MAC de nenhuma placa: qualquer
+ * Repetidor ou Gateway A por perto recebe (rede "mesh" por inundação / flooding).
+ * O campo "id" de cada mensagem é o MAC deste sensor, então dá para saber de onde ela veio.
  *
  * MODOS
  *  - Normal: envia 1 mensagem a cada INTERVALO_NORMAL_MS (2 s).
@@ -13,8 +15,10 @@
  *    para voltar ao modo normal.
  *
  * LED (GPIO 2, o LED azul da placa)
- *  - piscada curta (60 ms)  -> Repetidor confirmou o recebimento (ACK ESP-NOW)
- *  - piscada longa (600 ms) -> falha no envio (Repetidor fora de alcance/desligado)
+ *  - piscada curta (60 ms)  -> mensagem transmitida pelo rádio
+ *  - piscada longa (600 ms) -> erro ao transmitir
+ *  Em broadcast o ESP-NOW NÃO tem confirmação (ACK) de quem recebeu: a entrega
+ *  é medida no fim da cadeia (Gateway A / Node-RED / calcular_pdr.py).
  *  - aceso fixo             -> rodada de teste concluída
  */
 #include <WiFi.h>
@@ -23,8 +27,8 @@
 #include <esp_mac.h>
 
 // ===================== CONFIGURAÇÃO DA EQUIPE =====================
-// MAC do REPETIDOR par deste sensor (use o sketch 00_descobrir_mac)
-uint8_t MAC_REPETIDOR[6] = {0x24, 0x0A, 0xC4, 0x00, 0x00, 0x00};
+// Broadcast: todo ESP32 no mesmo canal recebe. Nenhum MAC para configurar.
+uint8_t MAC_BROADCAST[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 #define CANAL_ESPNOW         1      // mesmo canal em TODOS os nós ESP-NOW
 #define INTERVALO_NORMAL_MS  2000
@@ -43,7 +47,7 @@ uint8_t MAC_REPETIDOR[6] = {0x24, 0x0A, 0xC4, 0x00, 0x00, 0x00};
 //   SENSOR_SIMULADO -> dados mockados (luz variando e planta "crescendo") para testar a rede
 #define SENSOR_REAL      1
 #define SENSOR_SIMULADO  2
-#define TIPO_SENSOR      SENSOR_REAL   // por enquanto: dados mockados
+#define TIPO_SENSOR      SENSOR_SIMULADO   // por enquanto: dados mockados
 
 #define PINO_LDR          34     // tem que ser pino do ADC1 (32-39): o ADC2 não funciona com o rádio ligado
 #define LDR_INVERTIDO     0      // 1 se o valor CAI quando tem mais luz (comum em módulos LDR com saída AO)
@@ -73,7 +77,7 @@ bool     testeConcluido = false;
 uint32_t enviadosTeste = 0;
 uint32_t proximoEnvioMs = 0;
 
-// Estatísticas de enlace (ACK do repetidor)
+// Estatísticas de transmissão (em broadcast não há ACK: "ok" = saiu pelo rádio)
 volatile uint32_t ackOk = 0, ackFalha = 0;
 volatile int      ultimoStatus = -1;   // -1 nada, 0 ok, 1 falha
 
@@ -150,13 +154,13 @@ void enviar() {
   msg.v1 = v1;
   msg.v2 = v2;
   msg.hop = 0;
-  esp_err_t r = esp_now_send(MAC_REPETIDOR, (uint8_t *)&msg, sizeof(msg));
+  esp_err_t r = esp_now_send(MAC_BROADCAST, (uint8_t *)&msg, sizeof(msg));
   if (r != ESP_OK) {
     ackFalha++;
     ultimoStatus = 1;
   }
   if (!emTeste || contador % 50 == 0) {
-    Serial.printf("cont=%lu v1=%.2f v2=%.2f  (ack ok=%lu falha=%lu)\n",
+    Serial.printf("cont=%lu v1=%.2f v2=%.2f  (tx ok=%lu erro=%lu)\n",
                   (unsigned long)msg.cont, msg.v1, msg.v2,
                   (unsigned long)ackOk, (unsigned long)ackFalha);
   }
@@ -198,20 +202,18 @@ void setup() {
   esp_now_register_send_cb(aoEnviar);
 
   esp_now_peer_info_t peer = {};
-  memcpy(peer.peer_addr, MAC_REPETIDOR, 6);
+  memcpy(peer.peer_addr, MAC_BROADCAST, 6);
   peer.channel = 0;          // 0 = canal atual
   peer.ifidx = WIFI_IF_STA;
   peer.encrypt = false;
   if (esp_now_add_peer(&peer) != ESP_OK) {
-    Serial.println("Erro ao adicionar o Repetidor como peer");
+    Serial.println("Erro ao adicionar o endereço de broadcast como peer");
   }
 
-  esp_read_mac(msg.id, ESP_MAC_WIFI_STA);
-  Serial.printf("\nSENSOR pronto. Meu MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
+  esp_read_mac(msg.id, ESP_MAC_WIFI_STA);   // id da mensagem = MAC deste sensor
+  Serial.printf("\nSENSOR pronto. Meu MAC (id): %02X:%02X:%02X:%02X:%02X:%02X\n",
                 msg.id[0], msg.id[1], msg.id[2], msg.id[3], msg.id[4], msg.id[5]);
-  Serial.printf("Enviando para o repetidor %02X:%02X:%02X:%02X:%02X:%02X no canal %d\n",
-                MAC_REPETIDOR[0], MAC_REPETIDOR[1], MAC_REPETIDOR[2],
-                MAC_REPETIDOR[3], MAC_REPETIDOR[4], MAC_REPETIDOR[5], CANAL_ESPNOW);
+  Serial.printf("Enviando em BROADCAST no canal %d (sem MAC de destino)\n", CANAL_ESPNOW);
   Serial.println("Aperte BOOT para iniciar o teste de estresse.");
 }
 
@@ -234,7 +236,7 @@ void loop() {
         emTeste = false;
         testeConcluido = true;
         delay(300);  // espera os últimos ACKs
-        Serial.printf("=== TESTE CONCLUÍDO: %lu enviadas | ACK do repetidor: ok=%lu falha=%lu ===\n",
+        Serial.printf("=== TESTE CONCLUÍDO: %lu enviadas | transmissão: ok=%lu erro=%lu ===\n",
                       (unsigned long)enviadosTeste, (unsigned long)ackOk, (unsigned long)ackFalha);
         Serial.println("O PDR fim-a-fim é medido no log do Node-RED (ferramentas/calcular_pdr.py).");
         digitalWrite(PINO_LED, HIGH);
